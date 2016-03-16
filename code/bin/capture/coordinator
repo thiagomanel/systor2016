@@ -1,0 +1,166 @@
+#!/bin/bash -e
+
+if [ ! $HOME_REPLAYER ]; then
+	echo "You must to export HOME_REPLAYER first. To know more, plase take a look at the README file.";
+	exit 1;
+fi
+
+source $HOME_REPLAYER/etc/environment.conf
+source $HOME_REPLAYER/lib/helpers.sh
+
+# We are keeping this variable just to preserv the file names
+nbackground=0;
+
+check() {
+	local base_out=$1
+	local outpath=$base_out".check.out"
+	local errpath=$base_out".check.err"
+
+	$LIB_HOME/check.sh > $outpath 2> $errpath
+}
+
+drop_caches() {
+	local base=$1
+	local outpath=$base".dropcache.local.out"
+	local errpath=$base".dropcache.local.err"
+
+	$LIB_HOME/clearcache.sh $TARGET_MNT > $outpath 2> $errpath
+}
+
+background() {
+	 $BACKGROUND_PATH > /dev/null 2> /dev/null < /dev/null &
+}
+
+killall_background() {
+	killall -q "background"
+}
+
+foreground() {
+   local workload=$1
+   local trace_tool=$2
+   local base_out=$3
+   local nfg=$4
+   local nbg=$5
+   local bs=$6
+
+   outpath=$base_out".out"
+   errpath=$base_out".err"
+
+   workload_dir=$CAPTURE_HOME/workload/
+   #foreground_cmd="$workload_dir/${workload} $nfg 0 5000 /local2/metrology/target/big_file 1048576 debug"
+   foreground_cmd="$workload_dir/${workload} $nfg 0 5000 /local2/metrology/target/big_file $bs no-debug"
+   #foreground_cmd="$workload_dir/${workload} $nfg 0 5000 /local2/metrology/target/big_file $bs debug"
+
+   case "$trace_tool" in
+	baseline)
+		$foreground_cmd > $outpath 2> $errpath
+		;;
+	stap)
+		stap_out=$base_out".stap"
+		stap -g -DSTP_NO_OVERLOAD -DMAXMAPENTRIES=10000 $STAP_SCRIPT_PATH -c "$foreground_cmd > $outpath 2> $errpath" > $stap_out
+		;;
+	strace)
+		strace_out=$base_out".strace"
+		strace -f -q -t -ttt -T -e signal=none -e trace=open,read,write,pread64,pwrite64,pwrite,pread,stat,lseek,close -o $strace_out -f $foreground_cmd > $outpath 2> $errpath
+		;;
+	*)
+		echo $"Unknown command: $trace_tool {baseline|stap|strace}"
+		exit 1
+   esac
+}
+
+show_help() {
+	echo "Illegal number of parameters. Usage: $0 workload nforeground nbackground trace_tool"
+	echo -n "Usage:  $0 -w | --workload GUEST_USERNAME "
+	echo -n "-bg | --nbackground NUMBER_OF_BACKGROUND_JOBS"
+	echo -n "-fg | --nforeground NUMBER_OF_FOREGROUND_JOBS"
+	echo -n "-bs | --bsize BLOCK_SIZE"
+	echo "-t | --trace_tool TRACE_TOOL"
+
+	echo -e "\t$0 -h | --help"
+
+	echo
+	echo "-h  | --help: shows this help"
+	echo "-t  | --trace_tool: the trace tool used (baseline | strace | stap)"
+}
+
+check_parameters() {
+	check_parameter $workload "-w  | --workload"
+	success_or_die
+	check_parameter $trace_tool "-t  | --trace_tool"
+	success_or_die
+	check_parameter $nbackground "-bg  | --nbackground"
+	success_or_die
+	check_parameter $nforeground "-bg  | --nforeround"
+	success_or_die
+	check_parameter $nforeground "-bs  | --bsize"
+	success_or_die
+}
+
+define_parameters() {
+	while [ ! -z $1 ]; do
+		case $1 in
+			-w | --workload)
+				shift;
+				workload=$1;
+				;;
+			-t | --trace_tool)
+				shift;
+				trace_tool=$1;
+				;;
+			-bg | --nbackground)
+				shift;
+				nbackground=$1;
+				;;
+			-fg | --nforeground)
+				shift;
+				nforeground=$1;
+				;;
+			-bs | --bsize)
+				shift;
+				bsize=$1;
+				;;
+			-h | --help | *)
+				show_help;
+				exit 0;
+				;;
+		esac
+		shift
+	done
+	check_parameters
+	success_or_die
+}
+
+execute() {
+	mkdir -p $baseout_dir;
+
+	local baseout=$baseout_dir/$RANDOM.$workload.$nforeground.$nbackground.$bsize".load";
+
+	drop_caches $baseout;
+	check $baseout;
+
+	for i in `seq $nbackground`
+	do
+		echo "starting background", $1
+		background
+	done
+
+	echo "start load"
+	sleep 5
+	foreground $workload $trace_tool $baseout $nforeground $nbackground $bsize;
+
+	sleep 5
+	echo "kill background"
+	killall_background
+}
+
+main() {
+	define_parameters $@
+	success_or_die;
+
+	baseout_dir=$BASE_CAPTURE_OUTDIR-$trace_tool;
+
+	execute;
+}
+
+main $@;

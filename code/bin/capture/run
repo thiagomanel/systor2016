@@ -1,0 +1,16 @@
+#!/bin/bash
+
+for tool in strace baseline stap
+do
+    for wld in seqr seqw rr rw
+    do
+        for nfg in `seq 1 4`
+	do
+	   for i in `seq 1 10`
+	    do
+		echo "run sample" $i
+		./coordinator -w $wld --nforeground $nfg --nbackground 0 --trace_tool $tool --bsize 4096
+	    done
+	done
+    done
+done
