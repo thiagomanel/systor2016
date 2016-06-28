@@ -1,5 +1,5 @@
 # systor2016
-reproduction package for systor 2016 submission
+reproduction package for systor 2016 paper [A study on the errors and uncertainties of file system trace capture methods](http://dl.acm.org/citation.cfm?id=2928288)
 
 #script to run experimental scenarios
 * code/bin
